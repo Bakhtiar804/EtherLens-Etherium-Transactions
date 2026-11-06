@@ -1,6 +1,23 @@
 # EtherLens
 
-React + JavaScript wallet explorer built with Vite. Public Ethereum Mainnet addresses only.
+React + JavaScript wallet explorer built with Vite. Sepolia (default, Blockscout) and Ethereum Mainnet (RPC / Etherscan).
+
+## Deploy on Vercel
+
+Deploy the **whole project**, including `api/`, `server/`, `src/`, `package.json`, `package-lock.json` and `vercel.json`. Do not upload only `dist/`.
+
+- Set the Vercel Root Directory to this `vite-project` folder (the folder containing package.json and vercel.json).
+- Framework preset: Vite. Build command: `npm run build`. Output directory: `dist`.
+- `vercel.json` configures these settings and the Node Function duration. Keep `api/` at the project root, outside `src/` and `dist/`. Vercel deploys its four JavaScript entry points as same-origin `/api/config`, `/api/balance`, `/api/history`, and `/api/details` functions. No localhost proxy or continuously running Node server is needed on Vercel.
+- Sepolia requires **no environment variables or API keys**. For Mainnet only, add `ETH_RPC_URL` and `ETHERSCAN_API_KEY` in Vercel Project Settings → Environment Variables, select the desired deployment environments, and redeploy. Never prefix secrets with VITE_. Local .env is ignored by Git and is not uploaded.
+- Push/re-upload these changes and trigger a new deployment. Redeploying an old commit will not add the functions.
+- Verify `https://YOUR_DOMAIN/api/config` returns JSON identifying Sepolia and Blockscout. If it returns HTML or 404, verify the Root Directory and that `api/` and `vercel.json` are present in the deployed source. Inspect Function logs if the endpoint returns 500 or 504.
+
+`server/app.js` exports the shared Express handler without opening a port; the `api/*.js` Vercel entries import it. `server/index.js` starts the listener for local development and standalone Node hosting only. Static frontend assets are served by Vercel. Rate limiting and upstream pacing are per function instance, not a distributed global quota; upstream 429 responses remain visible. For larger deployments configure Vercel Firewall rate limits or a shared limiter.
+
+Official references: https://vercel.com/docs/frameworks/frontend/vite and https://vercel.com/docs/functions/runtimes/node-js.
+
+Local verification covers the four exported handlers through HTTP with mocked upstream responses, API validation, build, lint and data tests. An actual Vercel deployment must be verified after redeploying; no successful remote deployment is claimed by local checks.
 
 ## Development
 

@@ -5,11 +5,12 @@ export const amount = (value = '0', decimals = 18) => formatUnits(BigInt(value),
 export const compact = value => { const [a, b] = String(value).split('.'); const fraction = b?.slice(0, 5).replace(/0+$/, ''); return a + (fraction ? '.' + fraction : '') }
 export const time = value => value ? new Date(value).toLocaleString('en-GB', { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' }) + ' UTC' : 'Date unavailable / pending'
 export async function api(path, signal) {
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
   let response
   try { response = await fetch('/api/' + path, { signal }) }
-  catch (error) { if (error.name === 'AbortError') throw error; throw new Error('Cannot reach the local API. Run npm run dev:all and open its Vite URL.', { cause: error }) }
+  catch (error) { if (error.name === 'AbortError') throw error; throw new Error(local ? 'Cannot reach the local API. Run npm run dev:all and open its Vite URL.' : 'Cannot reach the API. Check your connection and try again.', { cause: error }) }
   let data
-  try { data = await response.json() } catch { throw new Error('API proxy is not responding. Keep npm run server running, start npm run dev, and open the printed Vite URL (not a static preview).') }
+  try { data = await response.json() } catch { throw new Error(local ? 'API proxy is not responding. Keep npm run server running, start npm run dev, and open the printed Vite URL (not a static preview).' : 'The deployed API is unavailable. Redeploy the full project with its api folder and vercel.json, then check Vercel Function logs.') }
   if (!response.ok) throw new Error(data.error || 'Request failed.')
   return data
 }
