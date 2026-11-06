@@ -1,0 +1,13 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { amount, normalizeAddress, records, totals, filterRecords } from '../src/lib/data.js'
+import { csvCell, statementRows, statementMeta, downloadStatement } from '../src/lib/statements.js'
+const a='0x0000000000000000000000000000000000000001',b='0x0000000000000000000000000000000000000002'
+const raw=(v={})=>({hash:'0xabc',from:a,to:b,value:'1000000000000000001',gasUsed:'21000',gasPrice:'1000000000',timeStamp:'1700000000',blockNumber:'10',...v})
+test('PDF statement creates multiple pages with full hashes and repeated headers',async()=>{const rs=records(Array.from({length:140},(_,i)=>raw({hash:'0x'+String(i).padStart(64,'0')})),'normal',a);const doc=await downloadStatement('pdf',{address:a,kind:'normal',filters:{direction:'All'},rows:rs,coverage:'Synthetic test fixture: 140 loaded records'},true);assert.ok(doc.internal.getNumberOfPages()>2);const output=doc.output();assert.ok(output.startsWith('%PDF'));assert.ok(output.includes('PARTIAL'));assert.ok(output.split('(Direction)').length>2)})
+test('address validation and exact decimal precision',()=>{assert.throws(()=>normalizeAddress('invalid'));assert.equal(normalizeAddress(a),a);assert.equal(amount('1000000000000000001'),'1.000000000000000001');assert.equal(amount('1234567',6),'1.234567')})
+test('failed and self transfers excluded; fees still paid on failure',()=>{const rs=records([raw(),raw({hash:'2',isError:'1'}),raw({hash:'3',to:a})],'normal',a);const t=totals(rs);assert.equal(t.sent,1000000000000000001n);assert.equal(t.received,0n);assert.equal(t.fees,63000000000000n)})
+test('internal and token events never attribute fees',()=>{assert.equal(records([raw()],'internal',a)[0].fee,null);assert.equal(records([raw({tokenDecimal:'6',tokenSymbol:'USDC'})],'tokens',a)[0].fee,null)})
+test('date, direction and hash filters; empty results',()=>{const rs=records([raw()],'normal',a);assert.equal(filterRecords(rs,{direction:'Sent',search:'abc',start:'2023-01-01',end:'2023-12-31'}).length,1);assert.equal(filterRecords(rs,{direction:'Received'}).length,0);assert.deepEqual(records([],'normal',a),[])})
+test('CSV formula injection and quote escaping',()=>{assert.equal(csvCell('=1+1'),'"\'=1+1"');assert.equal(csvCell('a"b'),'"a""b"');assert.equal(csvCell(' \t@cmd'),'"\' \t@cmd"')})
+test('statement preserves full values and explicit partial coverage',()=>{const rs=records([raw()],'normal',a);assert.equal(statementRows(rs)[0][5],'1.000000000000000001');assert.equal(statementRows(rs)[0][2],a);assert.match(statementMeta({address:a,kind:'normal',filters:{direction:'All'},rows:rs,coverage:'100 loaded'})[0][1],/PARTIAL/);assert.equal(new Set(records([raw(),raw({traceId:'1'})],'internal',a).map(r=>r.id)).size,2)})
