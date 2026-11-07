@@ -78,3 +78,27 @@ Docs: https://docs.blockscout.com/api-reference/get-address-transactions and rel
 ## Default network and normal browser entry
 
 Open http://localhost:5173/ or http://127.0.0.1:5173/ directly and enter a public address. Sepolia is now the default in both frontend and API. No custom URL or Sepolia .env credentials are needed. The network selector remains available and remembers the last explicit network per browser origin. A shared link with an explicit network takes priority over that saved selection. These defaults replace the initial Mainnet defaults documented above.
+
+## Send Sepolia ETH
+
+The Send Sepolia ETH panel adds two fields: recipient Ethereum address and native test ETH amount. Click Connect wallet in a browser with MetaMask or another injected EIP-1193 Ethereum wallet, select Sepolia in that wallet, enter the fields, choose Review transfer, then Confirm in wallet. The wallet presents the final signing/approval prompt. No private key, seed phrase, signing key, RPC API key or server signing endpoint is used by this flow. Existing .env variables remain for Mainnet explorer reads only.
+
+Sending is deliberately Sepolia-only, independently of the explorer's selected read network. The full connected sender is displayed and can differ from the address being explored. The form validates checksummed addresses, rejects the zero address, non-positive amounts, exponent notation, and precision beyond 18 decimals. It estimates gas with a 20% gas-limit buffer, shows the maximum fee and total, checks the pending wallet balance including fees, and pins both sender and chain ID. Wallet/account changes invalidate the review. Duplicate clicks are locked during signing and while awaiting confirmation. There is no automatic retry of a submitted transfer.
+
+Submitted hashes link to Sepolia Etherscan. The form waits for one confirmation for up to two minutes, keeps timed-out/unknown outcomes marked pending, and provides Check confirmation. Failed receipts and replacement/cancellation are distinct from success. On confirmation, explorer reads refresh; indexed history can lag the wallet receipt. Disconnect clears this app's connection only, not the wallet extension's persistent site permission.
+
+To use on Vercel, redeploy the updated project and use a browser with a wallet extension (or a wallet's in-app browser exposing window.ethereum). A normal Chrome browser with MetaMask works; a preview browser without a wallet can explore but cannot sign. The sending account needs Sepolia test ETH for both amount and gas. Native ETH transfers only; ERC-20 sends, WalletConnect and Mainnet sends are outside this form.
+
+Verification includes mocked wallet/provider tests for precision, fees, insufficient funds, changed chain/account and wallet rejection. No actual transaction was signed or broadcast during development; live wallet approval, receipt confirmation and replacement flows remain to be exercised by the user.
+
+## ETH / USDC asset selector
+
+The send panel now includes an ETH / USDC dropdown. Both assets are on Ethereum Sepolia. ETH uses 18 decimals; USDC uses Circle's official Sepolia deployment `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238` with 6 decimals (source: https://developers.circle.com/stablecoins/usdc-contract-addresses). This extends the earlier native-ETH-only transfer form.
+
+Read operations use the connected wallet RPC to show the selected asset balance. USDC reads verify deployed code and `decimals()` before calling `balanceOf`. Selecting an asset clears the amount and any previous review. Refresh balance rereads wallet balances. ETH gas remains a separate quantity from the USDC amount.
+
+A USDC write prepares an ERC-20 `transfer(recipient, amount)` call against that fixed contract with **zero native ETH value**. A static call checks expected transfer success before gas estimation and again before signing. The app checks the USDC balance and ETH gas balance independently, rechecks account/network/balances at submission, and never requests `approve`, allowances, or operator access. The connected signer submits the populated request only after the user clicks Confirm in wallet and approves it in their wallet. No token/API signing key is required.
+
+USDC confirmation requires a successful receipt and a Transfer log matching the configured contract, sender, recipient and exact amount. A mined receipt without that event is labeled unverified, with a status check and explorer link. This avoids claiming a token transfer succeeded solely from a successful transaction status. Network fees remain denominated in ETH; USDC and ETH are never added together. Blockscout indexed history may lag the receipt.
+
+Automated tests use mocked RPC/signers, including calldata decoding, 6-decimal precision, token/gas insufficiency, simulation rejection, changed balances, and receipt event matching. No actual USDC write or wallet approval is executed during verification. The updated source must be redeployed to update a Vercel-hosted copy.
