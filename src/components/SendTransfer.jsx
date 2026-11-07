@@ -4,15 +4,17 @@ import { formatEther, formatUnits, getAddress } from 'ethers'
 import { browserWallet, prepareTransfer, readTransferBalance, submitTransfer, transferError, transferReceiptStatus, validateTransfer, SEPOLIA_CHAIN_ID, USDC_ADDRESS } from '../lib/transfers'
 
 const explorer = 'https://sepolia.etherscan.io/tx/'
+const emptyBalance = { data: null, loading: false, error: '' }
 export default function SendTransfer({ onConfirmed }) {
   const [recipient, setRecipient] = useState(''), [ethAmount, setEthAmount] = useState('')
   const [asset, setAsset] = useState('ETH'), [balanceVersion, setBalanceVersion] = useState(0)
-  const [balanceView, setBalanceView] = useState({ data: null, loading: false, error: '' })
+  const [balanceView, setBalanceView] = useState(emptyBalance)
   const [wallet, setWallet] = useState(null), [chainId, setChainId] = useState(null)
   const [review, setReview] = useState(null), [busy, setBusy] = useState(''), [error, setError] = useState('')
   const [transaction, setTransaction] = useState(null)
   const lock = useRef(false), generation = useRef(0), currentWallet = useRef(null)
   const confirmedCallback = useRef(onConfirmed)
+  const injectedWallet = wallet?.injected
   useEffect(() => { confirmedCallback.current = onConfirmed }, [onConfirmed])
   useEffect(() => {
     let cancelled = false
@@ -21,28 +23,43 @@ export default function SendTransfer({ onConfirmed }) {
       if (!wallet || chainId !== SEPOLIA_CHAIN_ID) return
       try {
         const data = await readTransferBalance({ ...wallet, asset })
-        if (!cancelled) setBalanceView({ data, loading: false, error: '' })
-      } catch (e) { if (!cancelled) setBalanceView({ data: null, loading: false, error: transferError(e) }) }
+        if (!cancelled && currentWallet.current === wallet) setBalanceView({ data, loading: false, error: '' })
+      } catch (e) { if (!cancelled && currentWallet.current === wallet) setBalanceView({ data: null, loading: false, error: transferError(e) }) }
     }
     load()
     return () => { cancelled = true }
   }, [wallet, chainId, asset, balanceVersion])
   useEffect(() => {
-    if (!wallet) return
+    if (!injectedWallet) return
     const changed = () => {
       generation.current++
       setReview(null); setWallet(null); currentWallet.current = null; setChainId(null)
+      setBalanceView(emptyBalance)
       setError('Wallet account or network changed. Connect again to use the current account.')
     }
-    wallet.injected.on?.('accountsChanged', changed)
-    wallet.injected.on?.('chainChanged', changed)
-    wallet.injected.on?.('disconnect', changed)
-    return () => {
-      wallet.injected.removeListener?.('accountsChanged', changed)
-      wallet.injected.removeListener?.('chainChanged', changed)
-      wallet.injected.removeListener?.('disconnect', changed)
+    const accountChanged = accounts => {
+      const connection = currentWallet.current
+      if (connection?.injected !== injectedWallet) return
+      if (!accounts?.length) { changed(); return }
+      const account = getAddress(accounts[0])
+      if (account === connection.account) return
+      const next = { ...connection, account }
+      generation.current++
+      currentWallet.current = next
+      setWallet(next)
+      setReview(null)
+      setBalanceView(emptyBalance)
+      setError('')
     }
-  }, [wallet])
+    injectedWallet.on?.('accountsChanged', accountChanged)
+    injectedWallet.on?.('chainChanged', changed)
+    injectedWallet.on?.('disconnect', changed)
+    return () => {
+      injectedWallet.removeListener?.('accountsChanged', accountChanged)
+      injectedWallet.removeListener?.('chainChanged', changed)
+      injectedWallet.removeListener?.('disconnect', changed)
+    }
+  }, [injectedWallet])
   useEffect(() => () => { generation.current++ }, [])
 
   async function run(label, action) {
@@ -61,6 +78,42 @@ export default function SendTransfer({ onConfirmed }) {
       const next = { injected, provider, account: getAddress(accounts[0]) }
       generation.current++; currentWallet.current = next
       setWallet(next); setChainId(chain); setReview(null)
+    })
+  }
+  async function changeWallet() {
+    await run('Choosing account…', async () => {
+      const { injected, provider } = wallet
+      setReview(null)
+      generation.current++
+      try {
+        await injected.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] })
+      } catch (e) {
+        if ([-32601, 4200].includes(e?.code)) {
+          setError('Choose another account in your wallet extension. This page will update when the wallet shares the new account.')
+          return
+        }
+        if (e?.code === 4001) {
+          setError('Wallet change cancelled.')
+          return
+        }
+        throw e
+      }
+      const version = generation.current
+      const [accounts, chain] = await Promise.all([
+        injected.request({ method: 'eth_accounts' }),
+        injected.request({ method: 'eth_chainId' }),
+      ])
+      if (version !== generation.current) return
+      if (!accounts?.length) {
+        disconnect()
+        setError('No account was shared. Connect your wallet again to continue.')
+        return
+      }
+      const next = { injected, provider, account: getAddress(accounts[0]) }
+      currentWallet.current = next
+      setWallet(next)
+      setChainId(BigInt(chain))
+      setBalanceView(emptyBalance)
     })
   }
   async function switchNetwork() {
@@ -119,7 +172,13 @@ export default function SendTransfer({ onConfirmed }) {
   const pending = transaction?.status === 'pending' || transaction?.status === 'unverified'
   return <section id="send" className="panel send-panel">
     <div className="section-heading"><div><div className="eyebrow">SEPOLIA TESTNET</div><h2>Send ETH or USDC</h2><p>Select an asset, enter a recipient and amount. Your wallet reviews and signs.</p></div><span className="send-badge"><Wallet size={15}/> Wallet signed</span></div>
-    <div className="send-connection">{wallet ? <><div><small>Sending account</small><code>{wallet.account}</code></div><button type="button" disabled={!!busy} onClick={disconnect}>Disconnect</button></> : <><p>Connect MetaMask or an Ethereum browser wallet to send Sepolia ETH or test USDC.</p><button type="button" className="primary" disabled={!!busy} onClick={connect}><Wallet size={16}/>{busy === 'Connecting…' ? busy : 'Connect wallet'}</button></>}</div>
+    <div className="send-connection">{wallet ? <>
+      <div><small>Sending account</small><code>{wallet.account}</code></div>
+      <div className="wallet-actions">
+        <button type="button" disabled={!!busy} onClick={changeWallet}>{busy === 'Choosing account…' ? busy : 'Change wallet'}</button>
+        <button type="button" disabled={!!busy} onClick={disconnect}>Disconnect</button>
+      </div>
+    </> : <><p>Connect MetaMask or an Ethereum browser wallet to send Sepolia ETH or test USDC.</p><button type="button" className="primary" disabled={!!busy} onClick={connect}><Wallet size={16}/>{busy === 'Connecting…' ? busy : 'Connect wallet'}</button></>}</div>
     {wallet && chainId !== SEPOLIA_CHAIN_ID && <div className="send-warning"><span>Your wallet is on a different network. This form sends on Sepolia only.</span><button type="button" disabled={!!busy} onClick={switchNetwork}>Switch wallet to Sepolia</button></div>}
     <form onSubmit={prepare} className="send-form">
       <label htmlFor="send-asset">Asset<select id="send-asset" value={asset} disabled={!!busy || pending} onChange={e => { setAsset(e.target.value); setEthAmount(''); setReview(null); setError('') }}><option value="ETH">Ethereum (ETH)</option><option value="USDC">USD Coin (USDC)</option></select></label>
